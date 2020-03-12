@@ -1,4 +1,4 @@
-This is a folder for Lab-1 assignments in the course: DD2365 "Advanced Computation in Fluid Mechanics", spring term 2020, KTH Royal Institute of Technology in Stockholm, Sweden.
+This is a folder for Lab-3 assignments in the course: DD2365 "Advanced Computation in Fluid Mechanics", spring term 2020, KTH Royal Institute of Technology in Stockholm, Sweden.
 
 Author: Johan Hoffman
 
