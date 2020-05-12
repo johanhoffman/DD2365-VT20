@@ -26,9 +26,9 @@ resolution = 32
 
 mesh = RectangleMesh(Point(0.0, 0.0), Point(L, H), L*resolution, H*resolution)
 
-plt.figure()
-plot(mesh)
-plt.show()
+#plt.figure()
+#plot(mesh)
+#plt.show()
 
 
 #######################
@@ -74,15 +74,16 @@ upper.mark(boundaries, 4)
 # V for velocity, Q for presssure, PHI for the level set
 V = VectorFunctionSpace(mesh, "Lagrange", 1)
 Q = FunctionSpace(mesh, "Lagrange", 1)
-PHI = FunctionSpace(mesh, "Lagrange", 2)
+PHI = FunctionSpace(mesh, "Lagrange", 1)
 
 
 ## Define trial and test functions 
 u = TrialFunction(V)
 p = TrialFunction(Q)
+phi = TrialFunction(PHI)
+
 v = TestFunction(V)
 q = TestFunction(Q)
-phi = TrialFunction(PHI)
 w = TestFunction(PHI)
 
 ## Define iteration functions
@@ -95,9 +96,7 @@ p1 = Function(Q)
 phi0 = Function(PHI)
 phi1 = Function(PHI)
 
-## Mean velocities for trapozoidal time stepping
-um = 0.5*(u + u0)
-um1 = 0.5*(u1 + u0)
+
 
 
 
@@ -168,11 +167,10 @@ ls = Expression('sqrt((x[0]-X) * (x[0]-X) + (x[1]-Y) * (x[1]-Y)) - r', degree=2,
 
 # Initial signed function phi
 phi0 = interpolate(ls,PHI)               
-plottest = sign(phi0)
 
-plt.figure()
-plot(plottest, interactive=True) 
-plt.show()
+#plt.figure()
+#plot(sign(phi0), interactive=True) 
+#plt.show()
 
 # Define measure for boundary integration  
 ds = Measure('ds', domain=mesh, subdomain_data=boundaries)
@@ -206,11 +204,15 @@ def navierstokes():
     def mu(phi0):
         return (mu1 * 0.5* (1.0+ sign(phi0)) + mu2 * 0.5*(1.0 - sign(phi0)))
 
+    ## Mean velocities for trapozoidal time stepping
+    um = 0.5*(u + u0)
+    um1 = 0.5*(u1 + u0)
+
     # Stabilization parameters
     h = CellDiameter(mesh);
     u_mag = sqrt(dot(u1,u1))
-    d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0))) #Navier-Stokes
-    d2 = h*u_mag #Navier-Stokes
+    d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0))) 
+    d2 = h*u_mag 
 
     Fu = rho(phi0) * inner((u - u0)/dt + grad(um)*um1, v)*dx \
         - p1*div(v)*dx + mu(phi0)*inner(grad(um), grad(v))*dx \
@@ -243,26 +245,26 @@ def navierstokes():
     solve(Ap, p1.vector(), bp, "bicgstab", prec)
 
     u0.assign(u1)
-    return (u1,p1)
+    return (u0,p1)
 
 
 
 #######################################
-## Level set function and convection ##
+## Convection of the signed function ##
 #######################################
 
 
-def convection(u, phi0):
+def convection(uc, phi0):
 
     # Stabilization 
-    d3 = 0.5*mesh.hmin() # Convection 
+    d3 = 0.5*mesh.hmin() 
+    
+    Fconv = inner((phi1-phi0)/dt,w)*dx \
+    + inner(dot(uc,grad(phi1)),w)*dx \
+    + d3*dot(uc,grad(phi1))*dot(uc,grad(w))*dx
 
-    Fconv = inner((phi-phi0)/k,w)*dx \
-    + inner(dot(u,grad(phi)),w)*dx \
-    # +stabilizing term? + d3*dot(u,grad(phi))*dot(u,grad(w))*dx
-
-    solve(Fconv == 0, phi)
-    phi0.assign(phi)
+    solve(Fconv == 0, phi1)
+    phi0.assign(phi1)
     return phi0
 
 
@@ -273,28 +275,34 @@ def convection(u, phi0):
 
 
 
-def reinitialize(ls):
+def reinitialize(phi0):
  
-    # Normal of ls
+    # This probably need its own time-loop for pseudo-time tau
+
+    # Normal of phi0
     def normgrad(b):
         return (sqrt(b.dx(0)**2 + b.dx(1)**2))
 
+    xh =  mesh.hmin()
+
     # Interface thickness
-    eps = Constant(1.0 / dx)    
+    eps = Constant(1.0 / xh)    
 
     # Numerical diffusion parameter 
-    alpha = Constant(0.0625 / dx)  
+    alpha = Constant(0.0625 / xh)  
 
-    signp = ls / sqrt(ls*ls + eps*eps * normgrad(ls)*normgrad(ls))
+    signp = phi0 / sqrt(phi0*phi0 + eps*eps * normgrad(phi0)*normgrad(phi0))
 
     # FEM linearization of reinitialization equation
-    a = (phi / k) * w * dx
+    a = (phi1 / k) * w * dx
     L = (phi0 / k) * w * dx \
         + signp * (1.0 - sqrt(dot(grad(phi0), grad(phi0)))) * w * dx \
         - alpha * inner(grad(phi0), grad(w))* dx
+        # The numerical diffusion term was found in a pre-print and might need replacing or removing
 
-    solve (a == L, phi)
-    phi0.assign(phi)
+    solve (a == L, phi1)
+
+    phi0.assign(phi1)
     return phi0
 
 
@@ -305,20 +313,58 @@ def reinitialize(ls):
 
 
 # Open files to export solution to Paraview
-# solution_export = File("levelsetresults/solution.pvd")
+#velocity_solution_export = File("levelsetresults/levelset_velocity_solution.pvd")
+#pressure_solution_export = File("levelsetresults/levelset_pressure_solution.pvd")
+#phi_solution_export = File("levelsetresults/levelset_phi_solution.pvd")
 
 
 while t < T + DOLFIN_EPS:
 
-    # Navier-Stokes
+    ## Navier-Stokes
     velocity, pressure = navierstokes() 
 
+    u1.assign(velocity)
+    p1.assign(pressure)
+
+    ## Convection
     phiconv = convection(velocity, phi0)
 
-    phi0 = reinitialize(phiconv)
-  
-    # save values for velocity, pressure and phi
+    #phi0.assign(phiconv)
 
+    ## Reinitialization
+    phire = reinitialize(phiconv)
+
+    phi0.assign(phire)
+  
+    
+
+    if t > plot_time:     
+            
+        s = 'Time t = ' + repr(t) 
+        print(s)
+    
+        # Save solution to file
+        #velocity_solution_export << u1
+        #pressure_solution_export << p1
+        #pressure_solution_export << phi0
+
+        # Plot solution
+        #plt.figure()
+        #plot(u1, title="Velocity")
+        #plt.show()
+
+        #plt.figure()
+        #plot(p1, title="Pressure")
+        #plt.show()
+
+        #plt.figure()
+        #plot(sign(phi0), title="Phi", interactive=True)
+        #plt.show()
+
+        plot_time += T/plot_freq
+        
+    
+    u0.assign(u1)
     t += dt
 
 
