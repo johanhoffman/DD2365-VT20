@@ -294,13 +294,13 @@ def reinitialize(phi0):
     signp = phi0 / sqrt(phi0*phi0 + eps*eps * normgrad(phi0)*normgrad(phi0))
 
     # FEM linearization of reinitialization equation
-    a = (phi1 / k) * w * dx
-    L = (phi0 / k) * w * dx \
+    reina = (phi1 / k) * w * dx
+    reinb = (phi0 / k) * w * dx \
         + signp * (1.0 - sqrt(dot(grad(phi0), grad(phi0)))) * w * dx \
         - alpha * inner(grad(phi0), grad(w))* dx
         # The numerical diffusion term was found in a pre-print and might need replacing or removing
 
-    solve (a == L, phi1)
+    solve (reina == reinb, phi1)
 
     phi0.assign(phi1)
     return phi0
@@ -349,17 +349,17 @@ while t < T + DOLFIN_EPS:
         #pressure_solution_export << phi0
 
         # Plot solution
-        #plt.figure()
-        #plot(u1, title="Velocity")
-        #plt.show()
+        plt.figure()
+        plot(u1, title="Velocity")
+        plt.show()
 
-        #plt.figure()
-        #plot(p1, title="Pressure")
-        #plt.show()
+        plt.figure()
+        plot(p1, title="Pressure")
+        plt.show()
 
-        #plt.figure()
-        #plot(sign(phi0), title="Phi", interactive=True)
-        #plt.show()
+        plt.figure()
+        plot(sign(phi0), title="Phi", interactive=True)
+        plt.show()
 
         plot_time += T/plot_freq
         
