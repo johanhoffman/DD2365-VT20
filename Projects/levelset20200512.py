@@ -5,7 +5,7 @@ from dolfin import *;
 from mshr import *
 import dolfin.common.plotting as fenicsplot
 from matplotlib import pyplot as plt
-
+from ufl import sign
 
 # Needed for level set problem:
 #   1. phi(x) = min|x-x_i|, domain1
@@ -65,6 +65,41 @@ right.mark(boundaries, 2)
 lower.mark(boundaries, 3)
 upper.mark(boundaries, 4)
 
+###########################
+## Finite element spaces ##
+###########################
+
+
+## Generate finite element spaces 
+# V for velocity, Q for presssure, PHI for the level set
+V = VectorFunctionSpace(mesh, "Lagrange", 1)
+Q = FunctionSpace(mesh, "Lagrange", 1)
+PHI = FunctionSpace(mesh, "Lagrange", 2)
+
+
+## Define trial and test functions 
+u = TrialFunction(V)
+p = TrialFunction(Q)
+v = TestFunction(V)
+q = TestFunction(Q)
+phi = TrialFunction(PHI)
+w = TestFunction(PHI)
+
+## Define iteration functions
+## (u0,p0) solution from previous time step
+## (u1,p1) linearized solution at present time step  
+u0 = Function(V)
+u1 = Function(V)
+p0 = Function(Q)
+p1 = Function(Q)
+phi0 = Function(PHI)
+phi1 = Function(PHI)
+
+## Mean velocities for trapozoidal time stepping
+um = 0.5*(u + u0)
+um1 = 0.5*(u1 + u0)
+
+
 
 ################################
 ## Define boundary conditions ##
@@ -119,67 +154,11 @@ bcp1 = DirichletBC(Q, pout, dbc_right)
 bcp = [bcp0, bcp1]
 
 
-
-###########################
-## Finite element spaces ##
-###########################
-
-
-## Generate finite element spaces 
-# V for velocity, Q for presssure, PHI for the level set
-V = VectorFunctionSpace(mesh, "Lagrange", 1)
-Q = FunctionSpace(mesh, "Lagrange", 1)
-PHI = FunctionSpace(mesh, "Lagrange", 2)
-
-
-## Define trial and test functions 
-u = TrialFunction(V)
-p = TrialFunction(Q)
-v = TestFunction(V)
-q = TestFunction(Q)
-phi = TrialFunction(PHI)
-w = TestFunction(PHI)
-
-## Define iteration functions
-## (u0,p0) solution from previous time step
-## (u1,p1) linearized solution at present time step  
-u0 = Function(V)
-u1 = Function(V)
-p0 = Function(Q)
-p1 = Function(Q)
-phi0 = Function(PHI)
-phi1 = Function(PHI)
-
-## Mean velocities for trapozoidal time stepping
-um = 0.5*(u + u0)
-um1 = 0.5*(u1 + u0)
-
-
 # Physical properties
 rho1 = 1
 rho2 = 0.1
 mu1 = 1
 mu2 = 0.1
-
-
-# Stabilization parameters
-h = CellDiameter(mesh);
-u_mag = sqrt(dot(u1,u1))
-d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0))) #Navier-Stokes
-d2 = h*u_mag #Navier-Stokes
-d3 = 0.5*mesh.hmin() # Convection 
-
-# Numerical diffusion parameter 
-alpha = Constant (0.0625 / dx)   
-
-# Define measure for boundary integration  
-ds = Measure('ds', domain=mesh, subdomain_data=boundaries)
-
-# Set parameters for nonlinear and lienar solvers 
-num_nnlin_iter = 5 
-prec = "amg" if has_krylov_solver_preconditioner("amg") else "default" 
-
-
 
 # The initial state of the two domains, the signed function to be advected
 # levelsetfunction = distance(x) - radius 
@@ -189,12 +168,28 @@ ls = Expression('sqrt((x[0]-X) * (x[0]-X) + (x[1]-Y) * (x[1]-Y)) - r', degree=2,
 
 # Initial signed function phi
 phi0 = interpolate(ls,PHI)               
+plottest = sign(phi0)
 
-# Interface thickness
-eps = Constant (1.0 / dx)        
+plt.figure()
+plot(plottest, interactive=True) 
+plt.show()
 
+# Define measure for boundary integration  
+ds = Measure('ds', domain=mesh, subdomain_data=boundaries)
 
+# Set parameters for nonlinear and lienar solvers 
+num_nnlin_iter = 5 
+prec = "amg" if has_krylov_solver_preconditioner("amg") else "default" 
 
+# Set plot frequency
+plot_time = 0
+plot_freq = 10
+
+# Time stepping 
+T = 5
+dt =  0.5*mesh.hmin()           
+k = Constant (dt)
+t = dt
 
 
 
@@ -211,6 +206,12 @@ def navierstokes():
     def mu(phi0):
         return (mu1 * 0.5* (1.0+ sign(phi0)) + mu2 * 0.5*(1.0 - sign(phi0)))
 
+    # Stabilization parameters
+    h = CellDiameter(mesh);
+    u_mag = sqrt(dot(u1,u1))
+    d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0))) #Navier-Stokes
+    d2 = h*u_mag #Navier-Stokes
+
     Fu = rho(phi0) * inner((u - u0)/dt + grad(um)*um1, v)*dx \
         - p1*div(v)*dx + mu(phi0)*inner(grad(um), grad(v))*dx \
         + d1*inner((u - u0)/dt \
@@ -223,6 +224,7 @@ def navierstokes():
     ap = lhs(Fp)
     Lp = rhs(Fp)
 
+    # Assemble matrix and vector
     Au = assemble(au)
     bu = assemble(Lu)
 
@@ -241,7 +243,7 @@ def navierstokes():
     solve(Ap, p1.vector(), bp, "bicgstab", prec)
 
     u0.assign(u1)
-    return(u,p)
+    return (u1,p1)
 
 
 
@@ -250,10 +252,13 @@ def navierstokes():
 #######################################
 
 
-def convection(u, phi0)
+def convection(u, phi0):
+
+    # Stabilization 
+    d3 = 0.5*mesh.hmin() # Convection 
 
     Fconv = inner((phi-phi0)/k,w)*dx \
-    + inner(dot(u,grad(c)),w)*dx \
+    + inner(dot(u,grad(phi)),w)*dx \
     # +stabilizing term? + d3*dot(u,grad(phi))*dot(u,grad(w))*dx
 
     solve(Fconv == 0, phi)
@@ -274,6 +279,12 @@ def reinitialize(ls):
     def normgrad(b):
         return (sqrt(b.dx(0)**2 + b.dx(1)**2))
 
+    # Interface thickness
+    eps = Constant(1.0 / dx)    
+
+    # Numerical diffusion parameter 
+    alpha = Constant(0.0625 / dx)  
+
     signp = ls / sqrt(ls*ls + eps*eps * normgrad(ls)*normgrad(ls))
 
     # FEM linearization of reinitialization equation
@@ -282,9 +293,9 @@ def reinitialize(ls):
         + signp * (1.0 - sqrt(dot(grad(phi0), grad(phi0)))) * w * dx \
         - alpha * inner(grad(phi0), grad(w))* dx
 
-    solve (a == L, phi , bc)
+    solve (a == L, phi)
     phi0.assign(phi)
-    return phi
+    return phi0
 
 
 
@@ -297,29 +308,16 @@ def reinitialize(ls):
 # solution_export = File("levelsetresults/solution.pvd")
 
 
-# Set plot frequency
-plot_time = 0
-plot_freq = 10
-
-# Time stepping 
-T = 5
-dt =  0.5*mesh.hmin()           
-k = Constant (dt)
-t = dt
-
 while t < T + DOLFIN_EPS:
 
     # Navier-Stokes
+    velocity, pressure = navierstokes() 
 
-    u,p = navierstokes(dt) 
-    velocity = Function(V)
-    velocity.assign(u)
-    
-    phicon = convection(velocity, phi0)
+    phiconv = convection(velocity, phi0)
 
-    phirein = reinitialize(phicon)
-    signedfunction = Function(PHI)
-    signedfunction.assign(phirein)
+    phi0 = reinitialize(phiconv)
+  
+    # save values for velocity, pressure and phi
 
     t += dt
 
