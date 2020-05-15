@@ -172,9 +172,9 @@ ls = Expression('sqrt((x[0]-X) * (x[0]-X) + (x[1]-Y) * (x[1]-Y)) - r', degree=2,
 # Initial signed function phi
 phi0 = interpolate(ls,PHI)               
 
-#plt.figure()
-#plot(sign(phi0), interactive=True) 
-#plt.show()
+# plt.figure()
+# plot(sign(phi0), interactive=True) 
+# plt.show()
 
 # Define measure for boundary integration  
 ds = Measure('ds', domain=mesh, subdomain_data=boundaries)
@@ -183,15 +183,7 @@ ds = Measure('ds', domain=mesh, subdomain_data=boundaries)
 num_nnlin_iter = 5 
 prec = "amg" if has_krylov_solver_preconditioner("amg") else "default" 
 
-# Set plot frequency
-plot_time = 0
-plot_freq = 10
 
-# Time stepping 
-T = 3
-dt =  0.5*mesh.hmin()           
-k = Constant (dt)
-t = dt
 
 
 
@@ -283,9 +275,9 @@ def reinitialize(phi0):
  
     phi00.assign(phi0)
 
-    tau=0
-    dtau = 0.5*mesh.hmin()
-    num_steps = 5 #int(5/dt)
+    tau = 0
+    dtau = 0.01*mesh.hmin()
+    num_steps = 3 #int(5/dt)
 
     # Interface thickness
     xh =  mesh.hmin()
@@ -296,14 +288,15 @@ def reinitialize(phi0):
 
     # Smoothed signed function
     signphi = phi0 / sqrt(phi0*phi0 + eps*eps) 
+    # signphi = sign(phi0)
 
     for _ in range(num_steps):
         tau += dtau
         
         # FEM linearization of reinitialization equation
         rein = ((phi11 - phi00) / dtau) * w * dx \
-            - signphi * (1.0 - sqrt(dot(grad(phi00), grad(phi00)))) * w * dx \
-            - alpha * inner(grad(phi0), grad(w))* dx
+            - signphi * (1 - sqrt(dot(grad(phi00), grad(phi00)))) * w * dx \
+            #- alpha * inner(grad(phi0), grad(w))* dx
 
         solve(rein == 0, phi11)
 
@@ -318,11 +311,20 @@ def reinitialize(phi0):
 ## Time stepping ##
 ###################
 
+# Set plot frequency
+plot_time = 0
+plot_freq = 10
+
+# Time stepping 
+T = 2
+dt =  0.5*mesh.hmin()           
+k = Constant(dt)
+t = dt
 
 # Open files to export solution to Paraview
-velocity_solution_export = File("levelsetresults/levelset_velocity_solution.pvd")
-pressure_solution_export = File("levelsetresults/levelset_pressure_solution.pvd")
-phi_solution_export = File("levelsetresults/levelset_phi_solution.pvd")
+velocity_solution_export = File("levelsetresults/levelsetrein_velocity_solution.pvd")
+pressure_solution_export = File("levelsetresults/levelsetrein_pressure_solution.pvd")
+phi_solution_export = File("levelsetresults/levelsetrein_phi_solution.pvd")
 
 while t < T + DOLFIN_EPS:
 
@@ -339,10 +341,6 @@ while t < T + DOLFIN_EPS:
 
     ## Reinitialization
     phire = reinitialize(phiconv)
-
-    phi0.assign(phire)
-  
-    
 
     if t > plot_time:     
             
@@ -363,13 +361,14 @@ while t < T + DOLFIN_EPS:
         # plot(p1, title="Pressure")
         # plt.show()
 
-        plt.figure()
-        plot(sign(phi0), title="Phi", interactive=True)
-        plt.show()
+        # plt.figure()
+        # plot(sign(phi0), title="Phi", interactive=True)
+        # plt.show()
 
         plot_time += T/plot_freq
         
-    
+
+    phi0.assign(phire)
     u0.assign(u1)
     t += dt
 
