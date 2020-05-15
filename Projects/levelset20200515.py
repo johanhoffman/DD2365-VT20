@@ -285,7 +285,7 @@ def reinitialize(phi0):
 
     tau=0
     dtau = 0.5*mesh.hmin()
-    num_steps = 5 
+    num_steps = 5 #int(5/dt)
 
     # Interface thickness
     xh =  mesh.hmin()
@@ -301,12 +301,11 @@ def reinitialize(phi0):
         tau += dtau
         
         # FEM linearization of reinitialization equation
-        reina = (phi11 / k) * w * dx
-        reinb = (phi00 / k) * w * dx \
-            + signphi * (1.0 - sqrt(dot(grad(phi00), grad(phi00)))) * w * dx \
-            #- alpha * inner(grad(phi0), grad(w))* dx
+        rein = ((phi11 - phi00) / dtau) * w * dx \
+            - signphi * (1.0 - sqrt(dot(grad(phi00), grad(phi00)))) * w * dx \
+            - alpha * inner(grad(phi0), grad(w))* dx
 
-        solve(reina == reinb, phi11)
+        solve(rein == 0, phi11)
 
         phi00.assign(phi11)
 
