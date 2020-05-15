@@ -277,7 +277,7 @@ def convection(uc, phi0):
 
 def reinitialize(phi0):
  
-    # This probably need its own time-loop for pseudo-time tau
+    # This need its own time-loop for pseudo-time tau
 
     # Normal of phi0
     def normgrad(b):
