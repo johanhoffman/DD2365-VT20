@@ -285,7 +285,7 @@ def reinitialize(phi0):
 
     tau=0
     dtau = 0.5*mesh.hmin()
-    num_steps = int(5/dt)
+    num_steps = 5 
 
     # Interface thickness
     xh =  mesh.hmin()
