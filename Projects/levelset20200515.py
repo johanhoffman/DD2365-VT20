@@ -324,7 +324,6 @@ def reinitialize(phi0):
 velocity_solution_export = File("levelsetresults/levelset_velocity_solution.pvd")
 pressure_solution_export = File("levelsetresults/levelset_pressure_solution.pvd")
 phi_solution_export = File("levelsetresults/levelset_phi_solution.pvd")
-# signed_phi_solution_export = File("levelsetresults/levelset_signed_phi_solution.pvd")
 
 while t < T + DOLFIN_EPS:
 
@@ -355,8 +354,6 @@ while t < T + DOLFIN_EPS:
         # velocity_solution_export << u1
         # pressure_solution_export << p1
         # phi_solution_export << phi0
-        # signed_phi = sign(phi0)
-        # signed_phi_solution_export << signed_phi
 
         # Plot solution
         # plt.figure()
