@@ -45,7 +45,7 @@ def buildMesh(headway, length, aspect_ratio, angle, radius=1/10, rear=False, ful
 T = 5.0 			# final time
 num_steps = 5000   	# number of time steps
 dt = T / num_steps 	# time step size
-mu = 10**(-6)		# dynamic viscosity
+mu = 10**(-5)		# dynamic viscosity
 rho = 1.4			# density
 uin = 1.0			# inflow velocity
 
@@ -71,7 +71,6 @@ if(len(sys.argv) > 4):
 	if("rear" in sys.argv[4]):
 		rear = True
 
-print()
 print("Re: ", int(round(rho*uin*0.1/mu,0)))
 print("Aspect ratio:", round(aspect_ratio, 4))
 print("Angle:", angle)
@@ -89,17 +88,17 @@ if(double):
 # mesh, (xmax, ymax) = buildMesh(headway, length, aspect_ratio, angle, rear=rear,
 # 	full=full, double=double, resolution=24)
 
-mesh, (xmax, ymax) = msh.testMesh(res=48);
+mesh, (xmax, ymax) = msh.testMesh(res=32);
 print("Mesh size:", mesh.num_cells())
 
 # Define function spaces
-V = VectorFunctionSpace(mesh, "Lagrange", 2)
+V = VectorFunctionSpace(mesh, "Lagrange", 1)
 Q = FunctionSpace(mesh, "Lagrange", 1)
 
 # Define boundaries
 inflowBoundary = CompiledSubDomain("on_boundary && near(x[0], 0)")
 outflowBoundary = CompiledSubDomain("on_boundary && near(x[0], "+str(xmax)+")")
-slipBoundary = CompiledSubDomain("on_boundary && !(near(x[0], 0) || near(x[0], "+str(xmax)+"))")
+slipBoundary = CompiledSubDomain("on_boundary && (near(x[1], 0) || near(x[1], "+str(ymax)+") || !(near(x[0], 0) || near(x[0], "+str(xmax)+")))")
 
 uinflow = Expression(("uin*6*x[1]*(YMAX-x[1])/(YMAX*YMAX)", "0.0"), element=V.ufl_element(), YMAX=ymax, uin=uin);
 # uinflow = Expression(("t < uin ? t : uin", "0.0"), element=V.ufl_element(), uin=uin, t=0.0)
@@ -125,17 +124,6 @@ u1  = Function(V)
 p0 = Function(Q)
 p1  = Function(Q)
 
-# Define expressions used in variational forms
-
-dt = 0.5*mesh.hmin()
-U  = 0.5*(u0+u)
-um = 0.5*(u0+u1)
-n  = FacetNormal(mesh)
-f  = Constant((0, 0))
-k  = Constant(dt)
-mu = Constant(mu)
-rho = Constant(rho)
-
 # Mark boundaries for integration.
 ib = 1
 ob = 2
@@ -147,83 +135,73 @@ inflowBoundary.mark(boundaries, ib)
 outflowBoundary.mark(boundaries, ob)
 slipBoundary.mark(boundaries, sb)
 
-ds = Measure("ds", subdomain_data=boundaries)
+ds = Measure("ds", domain=mesh, subdomain_data=boundaries)
 
-beta = 100
-h = CellDiameter(mesh)
-gamma = beta/h;
-e = 1/h;
-f = 1/10;
+## ============================================================= ##
+## Define variational problem
 
-# u_mag = sqrt(dot(u1,u1))
-# d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0)))
-# d2 = h*u_mag
+# Define expressions used in variational forms
+dt = 0.1*mesh.hmin()
+f  = Constant((0, 0))
+k  = Constant(dt)
+nu = Constant(mu/rho);
+h = CellDiameter(mesh);
+n  = FacetNormal(mesh)
+u_mag = sqrt(dot(u1,u1))
+d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0)))
+d2 = h*u_mag
+gamma = 100/h
 
-# Define symmetric gradient
-def epsilon(u):
-	return (nabla_grad(u) + nabla_grad(u).T)/2
+# Mean velocities for trapozoidal time stepping
+um = 0.5*(u + u0)
+um1 = 0.5*(u1 + u0)
 
-# Define stress tensor
-def sigma(u, p):
-	return 2*mu*epsilon(u) - p*Identity(len(u))
+# Momentum variational equation on residual form
+Fu = (
+	inner((u - u0)/dt + grad(um)*um1, v)*dx 
+	+ nu*inner(grad(um), grad(v))*dx
+	- p1*div(v)*dx
+	## Source term
+	# - inner(f, v);
+	## Stabilization terms
+	+ d1*inner((u - u0)/dt + grad(um)*um1 + grad(p1), grad(v)*um1)*dx 
+	+ d2*div(um)*div(v)*dx
+	## Partial integration boundary term
+	- nu*inner(nabla_grad(um)*n, v)*ds(sb)
+	+ inner(p1*n, v)*ds(sb) 
+	## Slip boundary (no skin penetration) penalty term
+	+ gamma*inner(dot(um,n)*n, v)*ds(sb)
+)
+au = lhs(Fu)
+Lu = rhs(Fu)
 
-def tau(u, n):
-	return u - dot(u, n)*n;
-
-
-## Formulate the variational problem in Incremental pressure correction scheme (IPCS)
-## Good description/derivation here:
-## http://www.diva-portal.org/smash/get/diva2:1242050/FULLTEXT01.pdf
-
-# Define variational problem for step 1 (Tentative velocity solution)
-F1 = (
-	rho*dot((u - u0) / k, v)*dx
-	+ rho*dot(dot(u0, nabla_grad(u0)), v)*dx
-	# Stress tensor
-	+ inner(sigma(U, p0), epsilon(v))*dx
-	# + mu*inner(grad(u), grad(v))*dx
-	# Source term
-	# - dot(f, v)*dx
-	# Partial integration boundary term
-	+ dot(p0*n, v)*ds - dot(mu*nabla_grad(U)*n, v)*ds
-	# No skin penetration boundary condition (slip boundary)
-	+ gamma*inner(dot(u, n)*n, v)*ds(sb)
-	# Skin friction for slip boundary
-	# + e*inner(tau(u,n), v)*ds(sb)
-	# + e*f*inner(tau(dot(epsilon(u),n),n), v)*ds(sb)
+# Continuity variational equation on residual form
+Fp = (
+	## Navier stokes continuity equation on weak form
+	div(um1)*q*dx
+	## Stabilization terms
+	+ d1*inner((u1 - u0)/k + grad(um1)*um1 + grad(p), grad(q))*dx 
 	)
-
-# F1 = rho*inner((u-u0)/k, v)*dx + inner(mu*grad(u), grad(v))*dx \
-# 	+ rho*inner(dot(u0,nabla_grad(u0)), v)*dx + inner(nabla_grad(p0), v)*dx \
-# 	+ inner(mu*dot(nabla_grad(u) + nabla_grad(u).T, n) - p0*n, v)*ds(sb) \
-# 	+ inner(f, v)*dx \
-# 	+ gamma*inner(dot(u, n), dot(v, n))*ds(sb)
-
-a1 = lhs(F1)
-L1 = rhs(F1)
-
-# Define variational problem for step 2 (Pressure update)
-a2 = dot(nabla_grad(p), nabla_grad(q))*dx
-L2 = dot(nabla_grad(p0), nabla_grad(q))*dx - (1/k)*div(um)*q*dx
-
-# Define variational problem for step 3 (Velocity correction)
-a3 = dot(u, v)*dx + gamma*inner(dot(u, n), dot(v, n))*ds(sb)
-L3 = dot(u0, v)*dx - k*dot(nabla_grad(p1 - p0), v)*dx
+ap = lhs(Fp)
+Lp = rhs(Fp)
 
 # Define force measurement
 psiExp = Expression(("near(x[1], 0) || near(x[1], H) ? 0.0 : 1.0", "0.0"), H=ymax, element = V.ufl_element())
 psi = interpolate(psiExp, V)
-force = inner((u1 - u0)/k + grad(um)*um, psi)*ds(sb) - p1*div(psi)*ds(sb) + mu/rho*inner(grad(um), grad(psi))*ds(sb)
+force = (
+	inner((u1 - u0)/k 
+	+ grad(um1)*um1, psi)*ds(sb) 
+	- p1*div(psi)*ds(sb) 
+	+ nu*inner(grad(um1), grad(psi))*ds(sb)
+	)
 
+## ============================================================= ##
+## Assemble matrices
+Au = assemble(au)
+Ap = assemble(ap) 
 
-# Assemble matrices
-# A1 = assemble(a1)
-# A2 = assemble(a2)
-# A3 = assemble(a3)
-
-# Apply boundary conditions to matrices
-# [bc.apply(A1) for bc in bcu]
-# [bc.apply(A2) for bc in bcp]
+[bc.apply(Au) for bc in bcu]
+[bc.apply(Ap) for bc in bcp]
 
 # Create XDMF files for visualization output
 # xdmffile_u = XDMFFile('navier_stokes_cylinder/{}/{}/velocity.xdmf'.format(angle, aspect_ratio))
@@ -234,61 +212,41 @@ xdmffile_p = XDMFFile('navier_stokes_cylinder/pressure.xdmf')
 # Time-stepping
 t = 0
 time0 = time.time()
-n = 0
 
 t_array = []
 f_array = []
 
+prec = "amg" if has_krylov_solver_preconditioner("amg") else "default"
 print(int(T/dt), "iterations total")
+
 while t < T:
+	for i in range(5):
+		for j in range(5):
+			# Assemble momentum matrix and vector
+			Au = assemble(au)
+			bu = assemble(Lu)
 
-	for i in range(10):
+			# Compute velocity solution 
+			[bc.apply(Au, bu) for bc in bcu]
+			[bc.apply(u1.vector()) for bc in bcu]
+			solve(Au, u1.vector(), bu, "bicgstab", "default")
+
+			# Assemble continuity matrix and vector
+			Ap = assemble(ap) 
+			bp = assemble(Lp)
+
+			# Compute pressure solution 
+			[bc.apply(Ap, bp) for bc in bcp]
+			[bc.apply(p1.vector()) for bc in bcp]
+			solve(Ap, p1.vector(), bp, "bicgstab", prec)
+
 		# Update current time
-		# uinflow.t = t;
 		t += dt
+		u0.assign(u1)
 
-		try:
-			# Step 1: Tentative velocity step
-			A1 = assemble(a1)
-			b1 = assemble(L1)
-			[bc.apply(A1) for bc in bcu]
-			[bc.apply(b1) for bc in bcu]
-			solve(A1, u1.vector(), b1, 'bicgstab', 'hypre_amg')
-
-			# Step 2: Pressure correction step
-			A2 = assemble(a2)
-			b2 = assemble(L2)
-			[bc.apply(A2) for bc in bcp]
-			[bc.apply(b2) for bc in bcp]
-			solve(A2, p1.vector(), b2, 'bicgstab', 'hypre_amg')
-
-			# Step 3: Velocity correction step
-			A3 = assemble(a3)
-			b3 = assemble(L3)
-			[bc.apply(A3) for bc in bcu]
-			[bc.apply(b3) for bc in bcu]
-			solve(A3, u1.vector(), b3, 'cg', 'sor')
-
-			# Update previous solution
-			u0.assign(u1)
-			p0.assign(p1)
-
-		except RuntimeError:
-			plt.figure()
-			plot(mesh)
-			plot(p0)
-			plot(u0)
-			plt.show()
-			plt.close()
-
-			print("Divergent solution")
-
-			raise
-
-		n+=1
-
-	t_array.append(t)
-	f_array.append(assemble(force))
+	if(t > T/5):
+		t_array.append(t)
+		f_array.append(assemble(force))
 
 	# Save solution to file (XDMF/HDF5)
 	xdmffile_u.write(u1, t)
