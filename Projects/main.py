@@ -42,10 +42,10 @@ def buildMesh(headway, length, aspect_ratio, angle, radius=1/10, rear=False, ful
 
 
 
-T = 20.0 			# final time
+T = 5.0 			# final time
 num_steps = 5000   	# number of time steps
 dt = T / num_steps 	# time step size
-mu = 10**(-2)		# dynamic viscosity
+mu = 10**(-6)		# dynamic viscosity
 rho = 1.4			# density
 uin = 1.0			# inflow velocity
 
@@ -72,7 +72,7 @@ if(len(sys.argv) > 4):
 		rear = True
 
 print()
-print("Re: ", rho*uin*(1+aspect_ratio)/mu)
+print("Re: ", int(round(rho*uin*0.1/mu,0)))
 print("Aspect ratio:", round(aspect_ratio, 4))
 print("Angle:", angle)
 print("Double track:", double, ", Full length:", full, "Rear view:", rear)
@@ -89,7 +89,7 @@ if(double):
 # mesh, (xmax, ymax) = buildMesh(headway, length, aspect_ratio, angle, rear=rear,
 # 	full=full, double=double, resolution=24)
 
-mesh, (xmax, ymax) = msh.testMesh(res=32);
+mesh, (xmax, ymax) = msh.testMesh(res=48);
 print("Mesh size:", mesh.num_cells())
 
 # Define function spaces
@@ -99,18 +99,18 @@ Q = FunctionSpace(mesh, "Lagrange", 1)
 # Define boundaries
 inflowBoundary = CompiledSubDomain("on_boundary && near(x[0], 0)")
 outflowBoundary = CompiledSubDomain("on_boundary && near(x[0], "+str(xmax)+")")
-slipBoundary = CompiledSubDomain("on_boundary && ((near(x[1], 0) || near(x[1], "+str(ymax)+")) || !(near(x[0], 0) || near(x[0], "+str(xmax)+")))")
+slipBoundary = CompiledSubDomain("on_boundary && !(near(x[0], 0) || near(x[0], "+str(xmax)+"))")
 
-# uinflow = Expression(("uin*6*x[1]*(YMAX-x[1])/(YMAX*YMAX)", "0.0"), element=V.ufl_element(), YMAX=ymax, uin=uin);
+uinflow = Expression(("uin*6*x[1]*(YMAX-x[1])/(YMAX*YMAX)", "0.0"), element=V.ufl_element(), YMAX=ymax, uin=uin);
 # uinflow = Expression(("t < uin ? t : uin", "0.0"), element=V.ufl_element(), uin=uin, t=0.0)
 
 # Define Dirichlet boundary conditions
-# bcu_inflow = DirichletBC(V, uinflow, inflowBoundary)
-bcu_inflow = DirichletBC(V, Constant((uin, 0.0)), inflowBoundary)
+# bcu_inflow = DirichletBC(V, Constant((uin, 0.0)), inflowBoundary)
+bcu_inflow = DirichletBC(V, uinflow, inflowBoundary)
 # bcu_walls = DirichletBC(V, Constant((0.0, 0.0)), slipBoundary)
 # bcp_inflow = DirichletBC(Q, Constant(1.0), inflowBoundary)
 bcp_outflow = DirichletBC(Q, Constant(0), outflowBoundary)
-bcu = [bcu_inflow]
+bcu = [bcu_inflow] #, bcu_walls]
 bcp = [bcp_outflow]
 
 # Define trial and test functions
@@ -149,9 +149,11 @@ slipBoundary.mark(boundaries, sb)
 
 ds = Measure("ds", subdomain_data=boundaries)
 
-beta = 1
+beta = 100
 h = CellDiameter(mesh)
 gamma = beta/h;
+e = 1/h;
+f = 1/10;
 
 # u_mag = sqrt(dot(u1,u1))
 # d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0)))
@@ -160,11 +162,13 @@ gamma = beta/h;
 # Define symmetric gradient
 def epsilon(u):
 	return (nabla_grad(u) + nabla_grad(u).T)/2
-	# return sym(nabla_grad(u))
 
 # Define stress tensor
 def sigma(u, p):
 	return 2*mu*epsilon(u) - p*Identity(len(u))
+
+def tau(u, n):
+	return u - dot(u, n)*n;
 
 
 ## Formulate the variational problem in Incremental pressure correction scheme (IPCS)
@@ -172,12 +176,22 @@ def sigma(u, p):
 ## http://www.diva-portal.org/smash/get/diva2:1242050/FULLTEXT01.pdf
 
 # Define variational problem for step 1 (Tentative velocity solution)
-F1 = rho*dot((u - u0) / k, v)*dx + \
-	rho*dot(dot(u0, nabla_grad(u0)), v)*dx + \
-	inner(sigma(U, p0), epsilon(v))*dx - \
-	dot(f, v)*dx + \
-	dot(p0*n, v)*ds - dot(mu*nabla_grad(U)*n, v)*ds + \
-	gamma*inner(dot(u, n), dot(v, n))*ds(sb) 
+F1 = (
+	rho*dot((u - u0) / k, v)*dx
+	+ rho*dot(dot(u0, nabla_grad(u0)), v)*dx
+	# Stress tensor
+	+ inner(sigma(U, p0), epsilon(v))*dx
+	# + mu*inner(grad(u), grad(v))*dx
+	# Source term
+	# - dot(f, v)*dx
+	# Partial integration boundary term
+	+ dot(p0*n, v)*ds - dot(mu*nabla_grad(U)*n, v)*ds
+	# No skin penetration boundary condition (slip boundary)
+	+ gamma*inner(dot(u, n)*n, v)*ds(sb)
+	# Skin friction for slip boundary
+	# + e*inner(tau(u,n), v)*ds(sb)
+	# + e*f*inner(tau(dot(epsilon(u),n),n), v)*ds(sb)
+	)
 
 # F1 = rho*inner((u-u0)/k, v)*dx + inner(mu*grad(u), grad(v))*dx \
 # 	+ rho*inner(dot(u0,nabla_grad(u0)), v)*dx + inner(nabla_grad(p0), v)*dx \
@@ -190,11 +204,11 @@ L1 = rhs(F1)
 
 # Define variational problem for step 2 (Pressure update)
 a2 = dot(nabla_grad(p), nabla_grad(q))*dx
-L2 = dot(nabla_grad(p0), nabla_grad(q))*dx - (1/k)*div(u1)*q*dx
+L2 = dot(nabla_grad(p0), nabla_grad(q))*dx - (1/k)*div(um)*q*dx
 
 # Define variational problem for step 3 (Velocity correction)
-a3 = dot(u, v)*dx ##+ gamma*inner(dot(u, n), dot(v, n))*ds(sb)
-L3 = dot(u1, v)*dx - k*dot(nabla_grad(p1 - p0), v)*dx
+a3 = dot(u, v)*dx + gamma*inner(dot(u, n), dot(v, n))*ds(sb)
+L3 = dot(u0, v)*dx - k*dot(nabla_grad(p1 - p0), v)*dx
 
 # Define force measurement
 psiExp = Expression(("near(x[1], 0) || near(x[1], H) ? 0.0 : 1.0", "0.0"), H=ymax, element = V.ufl_element())
@@ -292,6 +306,6 @@ print("Drag:", np.average(f_array[len(f_array)//2:]), np.std(f_array[len(f_array
 plt.figure(figsize=(8,6))
 plot(u1)
 plt.show()
-plt.savefig(str(aspect_ratio)+":"+str(angle)+".png")
+# plt.savefig(str(aspect_ratio)+":"+str(angle)+".png")
 plt.close()
 
