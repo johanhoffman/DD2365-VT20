@@ -5,15 +5,52 @@ import numpy as np
 
 
 def testMesh(res=32, segments=32):
-	l = 2.2
+	l = 3
 	h = 0.41;
+	h1 = h-0.01
+	r = 0.15
 	domain = mshr.Rectangle(Point(0,0), Point(l,h))
-	obj = mshr.Circle(Point(0.3, 0.2), 0.05, res);
+	obj = mshr.Circle(Point(0.5, h1/2), r, res);
+	# obj += mshr.Rectangle(Point(0.5, h1/2-r), Point(0.9+r, h1/2+r))
+	# obj += mshr.Circle(Point(0.9+r, h1/2), r, res);
 
 	mesh = mshr.generate_mesh(domain-obj, res)
-	# mesh = refineMesh(mesh, 0.2, 0.8, 0.05, 0.36);
+	# mesh = refineMesh(mesh, 0.5-r, 0.9+2*r, 0.0, h);
+
+	plt.figure()
+	plot(mesh)
+	plt.show()
 
 	return mesh, (l,h)
+
+
+def basicDomain(angle, aspect_ratio, resolution):
+
+	L = 22;
+	H = 1 / (1-aspect_ratio);
+	l = 4
+
+	domain = tunnel(L, H)
+	obj = simpleTrain(l, 1.0, np.pi*angle/180)
+	obj = mshr.CSGTranslation(obj, Point(3, (H-1)/2))
+	mesh = mshr.generate_mesh(domain-obj, resolution)
+	mesh = refineMesh(mesh, 2.8, 3+l+0.2, 0, H)
+	mesh = refineMesh(mesh, 2.9, 3+l+1.5, 0, H)
+	mesh = refineMesh(mesh, L-0.3, L, 0, H)
+
+	return mesh, (L, H);
+
+def simpleTrain(length, width, angle):
+	beta = (width/2)*np.tan(angle)
+	points = [
+		Point(length, 0),
+		Point(length+beta, width/2),
+		Point(length, width),
+		Point(0, width),
+		Point(-beta, width/2),
+		Point(0,0)
+	]
+	return mshr.Polygon(points)
 
 def wedge(width, radius, angle, segments):
 	a = width/2-radius
@@ -83,7 +120,8 @@ def createMesh(length, resolution, angle, aspect_ratio, dx, domain, rear=False, 
 		L = length + 3*dx
 
 	domain = tunnel(L, H);
-	obj = train(angle, length, 1.0, radius=radius, segments=segments)
+	obj = simpleTrain(length, 1.0, angle)
+	# obj = train(angle, length, 1.0, radius=radius, segments=segments)
 	if(rear):
 		obj = mshr.CSGTranslation(obj, Point(0, aspect_ratio/2))
 	else: 
