@@ -6,40 +6,8 @@ import time
 import sys
 
 
-# def buildMesh(headway, length, aspect_ratio, angle, radius=1/20, rear=False, full=False, double=False, resolution=8):
 
-# 	h = 1
-# 	if(double):
-# 		h = 2
-
-# 	mesh, (l,h) = msh.createMesh(length, resolution*(length+headway), 
-# 		angle, aspect_ratio, headway, length+headway, rear=rear, full=full, 
-# 		double=double, radius=radius, segments=24)
-	
-# 	x0 = headway*0.9
-# 	x1 = l
-# 	if(full):
-# 		x1 = l-headway*0.9
-# 	y1 = h
-
-# 	if(double):
-# 		y1 = h/2
-
-# 	if(rear):
-# 		x0 = 0
-# 		x1 = length*2
-
-# 	mesh = msh.refineMesh(mesh, x0, x1, 0, y1)
-# 	# mesh = msh.refineMesh(mesh, headway, l, 0, ys)
-
-# 	plt.figure()
-# 	plot(mesh)
-# 	plt.show()
-
-# 	return mesh, (l,h)
-
-
-T = 12 			# final time
+T = 10 			# final time
 # num_steps = 5000   	# number of time steps
 # dt = T / num_steps 	# time step size
 mu = 10**(-5)		# dynamic viscosity
@@ -49,6 +17,8 @@ uin = 1.0			# inflow velocity
 aspect_ratio = 1/5
 angle = 10
 resolution = 64+32
+double = False
+_round = False
 
 
 ii = 0
@@ -62,27 +32,34 @@ while ii < len(sys.argv):
 	elif("-q" in sys.argv[ii]):
 		resolution = int(sys.argv[ii+1])
 		ii += 1
+	elif("-d" in sys.argv[ii]):
+		double = True
+	elif("-c" in sys.argv[ii]):
+		_round = True
+
 	ii += 1
 
 
-mesh, (xmax, ymax) = msh.basicDomain(angle, aspect_ratio, resolution);
+mesh, (xmax, ymax), (l0,l1,h0,h1) = msh.basicDomain(angle, aspect_ratio, resolution, double=double, round=_round);
 # plt.figure()
 # plot(mesh)
 # plt.show()
-
-# mesh, (xmax, ymax) = buildMesh(headway, length, aspect_ratio, angle, rear=rear,
-# 	full=full, double=double, resolution=16)
-# mesh, (xmax, ymax) = msh.testMesh(res=32);
 
 print("Re: ", int(round(rho*uin*ymax/mu,0)))
 print("Aspect ratio:", round(aspect_ratio, 4))
 print("Angle:", angle)
 print("Resolution:", resolution)
+print("Round:", _round)
 
-print("Aspect ratio:", round(aspect_ratio, 4), "Angle:", angle, "Resolution:", resolution, file=sys.stderr)
+# print("Aspect ratio:", round(aspect_ratio, 4), "Angle:", angle, "Resolution:", resolution, file=sys.stderr)
 print("Mesh size:", mesh.num_cells())
 
-folder = "data/res{}/ang{}/asp{}/".format(resolution, angle, round(aspect_ratio, 3))
+root = "data"
+if(double):
+	root = "double"
+if(_round):
+	angle = "_round"
+folder = "{}/res{}/ang{}/asp{}/".format(root, resolution, angle, round(aspect_ratio, 3))
 
 ## ============================================================= ##
 # Define function spaces
@@ -169,7 +146,7 @@ def tau(u):
 	global n
 	return u - dot(u,n)*n
 
-# Conbined slip boundary (wall and objects)
+# Conbined slip boundarys (walls and objects)
 ds1 = (ds(sb)+ds(wb))
 ds2 = (ds(sb)+ds(wb)+ds(ob))
 ds3 = (ds(sb)+ds(wb)+ds(ib))
@@ -187,7 +164,7 @@ Fu = (
 	+ d1*inner((u - u0)/dt + grad(um)*um1 + grad(p1), grad(v)*um1)*dx 
 	+ d2*div(um)*div(v)*dx
 
-	## Partial integration boundary term
+	## Partial integration boundary terms
 	- nu*inner(nabla_grad(um)*n, v)*ds2
 	+ inner(p1*n, v)*ds3
 
@@ -217,14 +194,19 @@ ap = lhs(Fp)
 Lp = rhs(Fp)
 
 # Define force measurement
-psiExp = Expression(("near(x[1], 0) || near(x[1], H) ? 0.0 : 1.0", "0.0"), H=ymax, element = V.ufl_element())
+
+eps = 10**(-4)
+psiExp = Expression(("L0 <= x[0] && x[0] <= L1 && H0 <= x[1] && x[1] <= H1 ? 1.0 : 0.0", "0.0"), 
+	L0=l0-eps ,L1=l1+eps, H0=h0-eps, H1=h1+eps, element = V.ufl_element())
 psi = interpolate(psiExp, V)
+
 force = (
 	inner((u1 - u0)/k 
-	+ grad(um1)*um1, psi)*ds(sb) 
-	- p1*div(psi)*ds(sb) 
-	+ nu*inner(grad(um1), grad(psi))*ds(sb)
+	+ grad(um1)*um1, psi)*dx 
+	- p1*div(psi)*dx 
+	+ nu*inner(grad(um1), grad(psi))*dx
 	)
+
 
 ## ============================================================= ##
 
@@ -247,7 +229,8 @@ f_array = []
 prec = "amg" if has_krylov_solver_preconditioner("amg") else "default"
 print(int(T/dt), "iterations total")
 
-with open(folder+"data.txt", "a") as file:
+with open(folder+"data.txt", "w") as file:
+
 	file.write("Re: " + str(int(round(rho*uin*ymax/mu,0)))+"\n")
 	file.write("Drag: \n")
 	file.close()
