@@ -7,18 +7,21 @@ import sys
 
 
 
-T = 10 			# final time
+T = 10 					# final time
+plot_intervall = 1/30
+plot_time = 1
 # num_steps = 5000   	# number of time steps
 # dt = T / num_steps 	# time step size
-mu = 10**(-5)		# dynamic viscosity
-rho = 1.4			# density
-uin = 1.0			# inflow velocity
+mu = 10**(-5)			# dynamic viscosity
+rho = 1.4				# density
+uin = 1.0				# inflow velocity
 
 aspect_ratio = 1/5
 angle = 10
 resolution = 64+32
 double = False
 _round = False
+_rounded = False
 
 
 ii = 0
@@ -36,11 +39,13 @@ while ii < len(sys.argv):
 		double = True
 	elif("-c" in sys.argv[ii]):
 		_round = True
+	elif("-p" in sys.argv[ii]):
+		_rounded = True
 
 	ii += 1
 
 
-mesh, (xmax, ymax), (l0,l1,h0,h1) = msh.basicDomain(angle, aspect_ratio, resolution, double=double, round=_round);
+mesh, (xmax, ymax), (l0,l1,h0,h1) = msh.basicDomain(angle, aspect_ratio, resolution, double=double, round=_round, rounded=_rounded);
 # plt.figure()
 # plot(mesh)
 # plt.show()
@@ -50,8 +55,8 @@ print("Aspect ratio:", round(aspect_ratio, 4))
 print("Angle:", angle)
 print("Resolution:", resolution)
 print("Round:", _round)
+print("Rounded:", _rounded)
 
-# print("Aspect ratio:", round(aspect_ratio, 4), "Angle:", angle, "Resolution:", resolution, file=sys.stderr)
 print("Mesh size:", mesh.num_cells())
 
 root = "data"
@@ -59,6 +64,8 @@ if(double):
 	root = "double"
 if(_round):
 	angle = "_round"
+if(_rounded):
+	root = "d"+root;
 folder = "{}/res{}/ang{}/asp{}/".format(root, resolution, angle, round(aspect_ratio, 3))
 
 ## ============================================================= ##
@@ -125,6 +132,7 @@ ds = Measure("ds", domain=mesh, subdomain_data=boundaries)
 
 # Define expressions used in variational forms
 dt = 0.1*aspect_ratio*mesh.hmin()
+print("dt:", dt)
 f  = Constant((0, 0))
 k  = Constant(dt)
 nu = Constant(mu/rho);
@@ -135,7 +143,7 @@ d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0)))
 d2 = h*u_mag
 gamma = 100/h
 theta = 1/(500*h)
-e = Constant(5)
+e = Constant(5)	## Very 
 
 # Mean velocities for trapozoidal time stepping
 um = 0.5*(u + u0)
@@ -262,7 +270,8 @@ while t < T:
 		t += dt
 		u0.assign(u1)
 
-	if(t > T/5):
+	if(t >= plot_time):
+		plot_time += plot_intervall
 
 		# Calculate drag force
 		f_ = assemble(force);

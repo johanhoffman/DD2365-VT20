@@ -24,7 +24,7 @@ def testMesh(res=32, segments=32):
 	return mesh, (l,h)
 
 
-def basicDomain(angle, aspect_ratio, resolution, double=False, length=22, round=False):
+def basicDomain(angle, aspect_ratio, resolution, double=False, length=22, round=False, rounded=False):
 
 	m = 1
 	if(double):
@@ -37,13 +37,17 @@ def basicDomain(angle, aspect_ratio, resolution, double=False, length=22, round=
 	h0 = (H-1)/2
 	h1 = h0+1
 	domain = tunnel(L, H*m)
+
 	if(round):
 		obj = roundTrain(l, 1.0)
 		l0 = 3-0.5
 		l1 = 3+l+0.5
-		
 	else:
-		obj = simpleTrain(l, 1.0, np.pi*angle/180)
+		if(rounded):
+			segments = int(360/(90-angle) * 8)
+			obj = roundedTrain(l, 1.0, np.pi*angle/180, segments=segments)
+		else:
+			obj = simpleTrain(l, 1.0, np.pi*angle/180)
 		b = (1/2)*np.tan(np.pi*angle/180)
 		l0 = 3-b
 		l1 = 3+l+b
@@ -51,7 +55,7 @@ def basicDomain(angle, aspect_ratio, resolution, double=False, length=22, round=
 	obj = mshr.CSGTranslation(obj, Point(3, h0))
 
 	mesh = mshr.generate_mesh(domain-obj, resolution)
-	mesh = refineMesh(mesh, 2.8, 3+l+0.2, 0, H)
+	mesh = refineMesh(mesh, l0, l1, 0, H)
 	mesh = refineMesh(mesh, 2.9, 3+l+1.5, 0, H)
 	mesh = refineMesh(mesh, L-0.2, L, 0, H*m)
 
@@ -69,15 +73,29 @@ def simpleTrain(length, width, angle):
 	]
 	return mshr.Polygon(points)
 
+def roundedTrain(length, width, angle, radius=1/10, segments=32):
+	dx = radius*np.sin(np.pi/2-angle)
+	dy = radius*(1-np.cos(np.pi/2-angle))
 
-def roundOver(r, t1, t2, dx, dy, segments):
-	points = []
-	dt = (t2-t1)/segments
-	for i in range(segments+1):
-		x = dx+r*np.cos(t1+i*dt)
-		y = dy + r*np.sin(t1+i*dt)
-		points.append(Point(x,y))
-	return points
+	s1 = simpleTrain(length-2*dx, width, 0)
+	s1 = mshr.CSGTranslation(s1, Point(dx, 0))
+	s2 = simpleTrain(length, width-2*dy, angle)
+	s2 = mshr.CSGTranslation(s2, Point(0, dy))
+
+	obj = s1+s2
+	for i in range(2):
+		for j in range(2):
+			obj += mshr.Circle(Point(dx+i*(length-2*dx), radius+j*(width-2*radius)), radius, segments)
+
+	return obj
+
+def testDomain(angle):
+	# t = tunnel(10,2)
+	segments = 360//angle * 8
+	v = roundedTrain(5, 1, np.pi*angle/180, segments=segments)
+
+	return mshr.generate_mesh(v, 32)
+
 
 def roundTrain(length, width, segments=32):
 	rect = mshr.Rectangle(Point(0,0), Point(length, width))
@@ -103,7 +121,8 @@ def refineMesh(mesh, x0, x1, y0, y1):
 
 if __name__ == "__main__":
 
-	mesh, (l,h) = basicDomain(10, 1/5, 32)
+	# mesh, (l,h) = basicDomain(10, 1/5, 32)
+	mesh = testDomain(20);
 	# mesh = refineMesh(mesh, 1.5, l, 0, h)
 	plt.figure()
 	plot(mesh)
